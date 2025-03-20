@@ -324,7 +324,7 @@ void performStoltInterpolation(cnnlHandle_t handle,
 void StoltInterp_sinc(cnnlHandle_t handle, 
                              cnrtQueue_t queue,
                              void * input,
-                             vector<complex<float>>& output,
+                             void * output,
                              const vector<double>& fr_axis,
                              const vector<double>& fa_axis,
                              double f0, double c, double Vr,
@@ -409,7 +409,7 @@ void StoltInterp_sinc(cnnlHandle_t handle,
     float beta = 0.0f;
     float a = 1.0f;
     // 分配设备内存
-    void *dev_fr_new_mtx, *dev_fr_axis, *dev_delta_n,*dev_deltan_expand,*dev_input,*dev_input2,*dev_gather_out,*center_idx;
+    void *dev_fr_new_mtx, *dev_fr_axis, *dev_delta_n,*dev_deltan_expand,*dev_input2,*dev_gather_out,*center_idx;
     size_t data_size = Na * Nr * sizeof(float);
     size_t data_size_1d =  Nr * sizeof(float);
     size_t data_size_4d =  P*Na*Nr * sizeof(float);
@@ -422,14 +422,14 @@ void StoltInterp_sinc(cnnlHandle_t handle,
     CNRT_CHECK(cnrtMalloc(&dev_delta_n, data_size));
     CNRT_CHECK(cnrtMalloc(&dev_deltan_expand, data_size_4d));
     CNRT_CHECK(cnrtMalloc(&center_idx, data_size_4d));
-    CNRT_CHECK(cnrtMalloc(&dev_input,data_size_complex));
+    //CNRT_CHECK(cnrtMalloc(&dev_input,data_size_complex));
     CNRT_CHECK(cnrtMalloc(&dev_input2,data_size_complex_out));
     CNRT_CHECK(cnrtMalloc(&dev_gather_out,data_size_complex_out));
 
 
 
     //CNRT_CHECK(cnrtMemcpy(dev_input, (void*)input.data(), data_size_complex, CNRT_MEM_TRANS_DIR_HOST2DEV));
-    dev_input = input;
+    //dev_input = input;
     //数据类型转换
     if(G_DEBUG == true){
         cnrtPlaceNotifier(start, queue);
@@ -562,7 +562,7 @@ void StoltInterp_sinc(cnnlHandle_t handle,
     
     //input维度扩展 1*Na*Nr*2 -> P*Na*Nr*2
 
-    CNNL_CHECK(cnnlExpand(handle, Na_Nr_2_float_desc, dev_input, 
+    CNNL_CHECK(cnnlExpand(handle, Na_Nr_2_float_desc, input, 
                         P_Na_Nr_2_float_desc, dev_input2));
     CNRT_CHECK(cnrtQueueSync(queue));
     if(G_DEBUG == true){
@@ -600,55 +600,6 @@ void StoltInterp_sinc(cnnlHandle_t handle,
                           P_Na_Nr_float_desc, dev_deltan_expand));
     CNRT_CHECK(cnrtQueueSync(queue));
     CNRT_CHECK(cnrtFree(dev_workspace_sub));   
-    
-//     // 在dev_deltan_expand操作后添加检查代码
-
-
-// // 检查dev_deltan_expand中的0值
-// vector<float> check_data(P * Na * Nr);  
-// CNRT_CHECK(cnrtMemcpy(check_data.data(), dev_deltan_expand, data_size_4d, CNRT_MEM_TRANS_DIR_DEV2HOST));
-
-// int zero_count = 0;
-// int first_zero = -1;
-// cout << "\n检查dev_deltan_expand中的0值:" << endl;
-
-// for(int i = 0; i < check_data.size(); i++) {
-//     if(abs(check_data[i]) < 1e-6) { // 使用小阈值来判断接近0的值
-//         if(first_zero == -1) {
-//             first_zero = i;
-//         }
-//         zero_count++;
-//         if(zero_count <= 10) {  // 只打印前10个0的位置
-//             cout << "发现0在位置 " << i << " (维度坐标: P=" 
-//                  << i/(Na*Nr) << ", Na=" 
-//                  << (i%(Na*Nr))/Nr << ", Nr=" 
-//                  << i%Nr << ")" << endl;
-//         }
-//     }
-// }
-
-// cout << "总共发现 " << zero_count << " 个0值" << endl;
-// cout << "0值占比: " << (float)zero_count/check_data.size() * 100 << "%" << endl;
-
-// // 打印最大值和最小值
-// float min_val = *min_element(check_data.begin(), check_data.end());
-// float max_val = *max_element(check_data.begin(), check_data.end());
-// cout << "数据范围: [" << min_val << ", " << max_val << "]" << endl;
-
-// if(zero_count > 0 && first_zero != -1) {
-//     // 打印第一个0值周围的数据
-//     cout << "\n第一个0值周围的数据:" << endl;
-//     int start_idx = max(0, first_zero-5);
-//     int end_idx = min((int)check_data.size(), first_zero+6);
-//     for(int i = start_idx; i < end_idx; i++) {
-//         cout << "位置 " << i << " (维度坐标: P=" 
-//              << i/(Na*Nr) << ", Na=" 
-//              << (i%(Na*Nr))/Nr << ", Nr=" 
-//              << i%Nr << "): " 
-//              << check_data[i] << endl;
-//     }
-// }
-
 
     //sinc计算
     void *dev_sinc_result;
@@ -694,20 +645,7 @@ void StoltInterp_sinc(cnnlHandle_t handle,
     void *dev_indices,*dev_indices2;
     CNRT_CHECK(cnrtMalloc(&dev_indices, data_size_4d));
     CNRT_CHECK(cnrtMalloc(&dev_indices2, data_size_complex_out));
-
-
-
-    // void* host_mask = malloc(data_size_4d);
-    // CNRT_CHECK(cnrtMemcpy(host_mask, dev_mask_out, data_size_4d, CNRT_MEM_TRANS_DIR_DEV2HOST));
-    // float* mask_array = (float*)host_mask;
-    // for(int i = 890; i < 900; i++) {
-    //         cout <<"Mask values : "<< i << ":" << mask_array[i] << " "<<endl;
-
-    // }
-    // cout << endl;
-    // free(host_mask);
-
-    // 3. 使用正确的类型转换参数
+    // 类型转换
     CNNL_CHECK(cnnlCastDataType(handle,
                            P_Na_Nr_float_desc,        // 输入描述符
                            dev_mask_out,     // 输入数据
@@ -715,42 +653,9 @@ void StoltInterp_sinc(cnnlHandle_t handle,
                            P_Na_Nr_int32_desc,     // 输出描述符
                            dev_indices));    // 输出数据
     CNRT_CHECK(cnrtQueueSync(queue));
-
-
-//     //检查转换后的indices值
-// void* host_indices_pre = malloc(data_size_4d);
-// CNRT_CHECK(cnrtMemcpy(host_indices_pre, dev_indices, data_size_4d, CNRT_MEM_TRANS_DIR_DEV2HOST));
-// int* indices_pre = (int*)host_indices_pre;
-// cout << "Indices before expand (first 10): ";
-// for(int i = 890; i < 900; i++) {
-   
-//                  cout << i << ":" << indices_pre[i] << " "<<endl;
-             
-// }
-// cout << endl;
-// free(host_indices_pre);
     CNNL_CHECK(cnnlExpand(handle, P_Na_Nr_int32_desc, dev_indices,
                             P_Na_Nr_2_int32_desc, dev_indices2));
     CNRT_CHECK(cnrtQueueSync(queue));
-    
-// 6. 最后检查expand后的indices值
-// void* host_indices = malloc(data_size_complex_out);
-// CNRT_CHECK(cnrtMemcpy(host_indices, dev_indices2, data_size_complex_out, CNRT_MEM_TRANS_DIR_DEV2HOST));
-// int* indices_array = (int*)host_indices;
-// bool has_invalid = false;
-// cout << "Indices after expand (first 10): ";
-// for(int i = 0; i < P*Na*Nr*2; i++) {
-    
-//     if(indices_array[i] < 0 || indices_array[i] >= Nr) {
-//         has_invalid = true;
-//         cout << i << " ";
-//     }
-// }
-// cout << endl;
-// if(has_invalid) {
-//     cout << "Warning: Invalid indices detected!" << endl;
-// }
-// free(host_indices);
     CNNL_CHECK(cnnlGather(handle, 2, 
                             P_Na_Nr_2_float_desc, dev_input2,  
                             P_Na_Nr_2_int32_desc, dev_indices2, 
@@ -768,49 +673,6 @@ void StoltInterp_sinc(cnnlHandle_t handle,
     void* inputs2[] = {dev_gather_out, dev_sinc_result2};
     CNNL_CHECK(cnnlMulN(handle, descs2, inputs2, 2, P_Na_Nr_2_float_desc, dev_input2));
     CNRT_CHECK(cnrtQueueSync(queue));
-
-// // 检查dev_input2中的NaN值
-// vector<float> check_data(P * Na * Nr * 2);  // 2表示复数的实部和虚部
-// CNRT_CHECK(cnrtMemcpy(check_data.data(), dev_input2, data_size_complex_out, CNRT_MEM_TRANS_DIR_DEV2HOST));
-
-// int nan_count = 0;
-// int first_nan = -1;
-// cout << "\n检查dev_input2中的NaN值:" << endl;
-
-// // 检查实部和虚部
-// for(int i = 0; i < check_data.size(); i++) {
-//     if(isnan(check_data[i])) {
-//         if(first_nan == -1) {
-//             first_nan = i;
-//         }
-//         nan_count++;
-//         if(nan_count <= 10) {  // 只打印前10个NaN的位置
-//             cout << "发现NaN在位置 " << i << " (维度坐标: P=" 
-//                  << i/(Na*Nr*2) << ", Na=" 
-//                  << (i%(Na*Nr*2))/(Nr*2) << ", Nr=" 
-//                  << ((i%(Na*Nr*2))%(Nr*2))/2 << ", 实/虚=" 
-//                  << i%2 << ")" << endl;
-//         }
-//     }
-// }
-
-// cout << "总共发现 " << nan_count << " 个NaN值" << endl;
-// cout << "NaN值占比: " << (float)nan_count/check_data.size() * 100 << "%" << endl;
-
-// if(nan_count > 0 && first_nan != -1) {
-//     // 打印第一个NaN值周围的数据
-//     cout << "\n第一个NaN值周围的数据:" << endl;
-//     int start_idx = max(0, first_nan-10);
-//     int end_idx = min((int)check_data.size(), first_nan+11);
-//     for(int i = start_idx; i < end_idx; i++) {
-//         cout << "位置 " << i << " (维度坐标: P=" 
-//              << i/(Na*Nr*2) << ", Na=" 
-//              << (i%(Na*Nr*2))/(Nr*2) << ", Nr=" 
-//              << ((i%(Na*Nr*2))%(Nr*2))/2 << ", 实/虚=" 
-//              << i%2 << "): " 
-//              << check_data[i] << endl;
-//     }
-// }
     if(G_DEBUG == true){
         cnrtPlaceNotifier(end, queue);
         CNRT_CHECK(cnrtQueueSync(queue));  
@@ -843,14 +705,14 @@ void StoltInterp_sinc(cnnlHandle_t handle,
     if (workspace_reduce_size > 0) {
         CNRT_CHECK(cnrtMalloc(&workspace, workspace_reduce_size));
     }                                
-    void *dev_output;
-    CNRT_CHECK(cnrtMalloc(&dev_output, data_size_complex));
+    //void *dev_output;
+    //CNRT_CHECK(cnrtMalloc(&dev_output, data_size_complex));
     float alpha = 1.0f;
     float beta_final = 0.0f;
     CNNL_CHECK(cnnlReduce(handle, reduce_desc, workspace, workspace_reduce_size,
                             &alpha, P_Na_Nr_2_float_desc, dev_input2, 
                             0, nullptr, 
-                            &beta_final, Na_Nr_2_float_desc, dev_output));
+                            &beta_final, Na_Nr_2_float_desc, output));
 
     CNNL_CHECK(cnnlDestroyReduceDescriptor(reduce_desc));
     CNRT_CHECK(cnrtQueueSync(queue));
@@ -863,31 +725,13 @@ void StoltInterp_sinc(cnnlHandle_t handle,
         host_time=Host_Timer.tv_usec;
         cout << "降维度执行时间(host): " << host_time/1000 << " ms" << endl;
     }
-    ////////////////////////////////////////////////////
-//     void* host_indices_pre = malloc(data_size_complex);
-// CNRT_CHECK(cnrtMemcpy(host_indices_pre, dev_output, data_size_complex, CNRT_MEM_TRANS_DIR_DEV2HOST));
-// float* indices_pre = (float*)host_indices_pre;
-// cout << "Indices before expand (first 10): ";
-// for(int i = 0; i < 10; i++) {
-   
-//                  cout << i << ":" << indices_pre[i] << " "<<endl;
-             
-// }
-// cout << endl;
-// free(host_indices_pre);
-////////////////////////////////////////////////////
-    CNRT_CHECK(cnrtMemcpy(output.data(), dev_output, data_size_complex, CNRT_MEM_TRANS_DIR_DEV2HOST));
-    CNRT_CHECK(cnrtQueueSync(queue));
+
+    //CNRT_CHECK(cnrtMemcpy(output.data(), dev_output, data_size_complex, CNRT_MEM_TRANS_DIR_DEV2HOST));
+    //CNRT_CHECK(cnrtQueueSync(queue));
     //output = dev_output;
-    // for (int i = 0; i < 5; i++) {
-    //     for (int j = 0; j < 5; j++) {
-    //         cout << output[i * Nr + j] << " ";
-    //     }
-    //     cout << endl;
-    // }
+
 
     // 释放所有申请的资源
-    // 释放描述符
     CNNL_CHECK(cnnlDestroyOpTensorDescriptor(optensor_desc));
     CNNL_CHECK(cnnlDestroyTensorDescriptor(Na_Nr_float_desc));
     CNNL_CHECK(cnnlDestroyTensorDescriptor(Nr_float_desc));
@@ -905,7 +749,7 @@ void StoltInterp_sinc(cnnlHandle_t handle,
     CNRT_CHECK(cnrtFree(dev_fr_new_mtx));
     CNRT_CHECK(cnrtFree(dev_delta_n));
     CNRT_CHECK(cnrtFree(dev_deltan_expand));
-    CNRT_CHECK(cnrtFree(dev_input));
+    //CNRT_CHECK(cnrtFree(dev_input));
     CNRT_CHECK(cnrtFree(dev_input2));
     CNRT_CHECK(cnrtFree(dev_NrOut));
     CNRT_CHECK(cnrtFree(dev_Pdata));
@@ -916,7 +760,7 @@ void StoltInterp_sinc(cnnlHandle_t handle,
     CNRT_CHECK(cnrtFree(dev_indices));
     CNRT_CHECK(cnrtFree(dev_indices2));
     CNRT_CHECK(cnrtFree(dev_sinc_result2));
-    CNRT_CHECK(cnrtFree(dev_output));
+    //CNRT_CHECK(cnrtFree(dev_output));
 
     // 释放workspace内存
     if (workspace != nullptr) {

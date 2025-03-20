@@ -20,11 +20,12 @@ using namespace std;
 
 // 全局调试标志
 bool G_DEBUG = false;
+bool G_OUTPUT = false;
 
 void initDevice(int &dev, cnrtQueue_t &queue, cnnlHandle_t &handle) {
     CNRT_CHECK(cnrtGetDevice(&dev));
     cout << "当前使用的MLU设备号: " << dev << endl;
-    CNRT_CHECK(cnrtSetDevice(1));
+    CNRT_CHECK(cnrtSetDevice(dev));
     CNRT_CHECK(cnrtQueueCreate(&queue));
     CNNL_CHECK(cnnlCreate(&handle));
     CNNL_CHECK(cnnlSetQueue(handle, queue));
@@ -535,31 +536,24 @@ params.f_nc = -6900;
             float mul_time = mul_timer.tv_usec;
             cout << "点乘执行时间: " << mul_time/1000 << " ms" << endl;
             // 将点乘结果从设备拷贝回主机
-            CNRT_CHECK(cnrtMemcpy(result.data(), d_result, result_size, CNRT_MEM_TRANS_DIR_DEV2HOST));
+            //CNRT_CHECK(cnrtMemcpy(result.data(), d_result, result_size, CNRT_MEM_TRANS_DIR_DEV2HOST));
             // 释放设备内存
             CNRT_CHECK(cnrtFree(d_theta_ft_fa));
-            //CNRT_CHECK(cnrtFree(d_result));
-            cout << "\n点乘后的结果前5x5个值：" << endl;
-            for (int i = 0; i < min(5, (int)Na); ++i) {
-                for (int j = 0; j < min(5, (int)Nr); ++j) {
-                    complex<float> val = result[i * Nr + j];
-                    printf("(%.3e,%.3e) ", val.real(), val.imag());
-                }
-                cout << endl;
-            }
+            
+
             HostTimer grid_timer;
             grid_timer.start();
             // 在点乘操作后添加：
              vector<complex<float>> stolt_result(Na * Nr);
             //performStoltInterpolation(handle, queue, result, stolt_result, fr_axis, fa_axis,f0, c, Vr, Na, Nr,fr_gap);
-            StoltInterp_sinc(handle, queue, d_result, stolt_result, fr_axis, fa_axis, f0, c, Vr, Na, Nr, params.Fr,6);
+            StoltInterp_sinc(handle, queue, d_result, d_result, fr_axis, fa_axis, f0, c, Vr, Na, Nr, params.Fr,6);
             CNRT_CHECK(cnrtQueueSync(queue));
 
             grid_timer.stop();
         float grid_time = grid_timer.tv_usec;
         cout << "GridSampleForward执行时间: " << grid_time/1000 << " ms" << endl;
 
-            result = stolt_result;
+            //result = stolt_result;
 
 //////////////////////////////////////////////////////////////////////
 // // 检查NaN的数量
@@ -609,15 +603,13 @@ params.f_nc = -6900;
             cout << "\n执行2D IFFT..." << endl;
 
             // 分配MLU内存
-            void* d_ifft_in;
-            void* d_ifft_out;
-            size_t ifft_size = Na * Nr * sizeof(complex<float>);
-            CNRT_CHECK(cnrtMalloc(&d_ifft_in, ifft_size));
-            CNRT_CHECK(cnrtMalloc(&d_ifft_out, ifft_size));
             
+            void* d_ifft_out;
+            size_t ifft_size = Na * Nr * 2*sizeof(float);
+            CNRT_CHECK(cnrtMalloc(&d_ifft_out, ifft_size));
+            //CNRT_CHECK(cnrtMalloc(&d_result, ifft_size));
             // 拷贝插值结果到设备
-            //d_ifft_in = d_result;
-            CNRT_CHECK(cnrtMemcpy(d_ifft_in, result.data(), ifft_size, CNRT_MEM_TRANS_DIR_HOST2DEV));
+            //CNRT_CHECK(cnrtMemcpy(d_result, d_result, ifft_size, cnrtMemcpyDevToDev));
 
             // 创建张量描述符
             cnnlTensorDescriptor_t ifft_input_desc, ifft_output_desc;
@@ -664,9 +656,10 @@ params.f_nc = -6900;
             cnrtNotifierCreate(&end);
             cnrtPlaceNotifier(start, queue);
 
-            CNNL_CHECK(cnnlExecFFT(handle, ifft_range_desc, d_ifft_in, range_scale, 
+            CNNL_CHECK(cnnlExecFFT(handle, ifft_range_desc, d_result, range_scale, 
                                   ifft_range_workspace, d_ifft_out, 1));
-            
+            CNRT_CHECK(cnrtQueueSync(queue));
+
             cnrtPlaceNotifier(end, queue);
             CNRT_CHECK(cnrtQueueSync(queue));
             
@@ -748,7 +741,7 @@ params.f_nc = -6900;
             cnrtPlaceNotifier(start, queue);
 
             CNNL_CHECK(cnnlExecFFT(handle, ifft_azimuth_desc, d_ifft_transposed, azimuth_scale, 
-                                  ifft_azimuth_workspace, d_ifft_in, 1));
+                                  ifft_azimuth_workspace, d_result, 1));
             
             cnrtPlaceNotifier(end, queue);
             CNRT_CHECK(cnrtQueueSync(queue));
@@ -758,7 +751,7 @@ params.f_nc = -6900;
 
             
             // 最后的转置
-            CNNL_CHECK(cnnlTranspose_v2(handle, ifft_trans_desc, ifft_transposed_desc, d_ifft_in,
+            CNNL_CHECK(cnnlTranspose_v2(handle, ifft_trans_desc, ifft_transposed_desc, d_result,
                                        ifft_input_desc, d_ifft_out,
                                        ifft_transpose_workspace, ifft_transpose_workspace_size));
             CNRT_CHECK(cnrtQueueSync(queue));
@@ -797,36 +790,42 @@ params.f_nc = -6900;
                 }
                 cout << endl;
             }
+            if(G_OUTPUT == true)
+            {
+//保存IFFT结果到文件
+cout << "\n保存结果到result.txt..." << endl;
+ofstream outfile("result.txt");
+if (!outfile) {
+    cerr << "无法创建输出文件" << endl;
+    return;
+}
 
-            //保存IFFT结果到文件
-            cout << "\n保存结果到result.txt..." << endl;
-            ofstream outfile("result.txt");
-            if (!outfile) {
-                cerr << "无法创建输出文件" << endl;
-                return;
+// 设置输出精度
+outfile << scientific;  // 使用科学计数法
+outfile.precision(6);   // 设置精度为6位
+
+// 写入数据
+for (int i = 0; i < Na; ++i) {
+    for (int j = 0; j < Nr; ++j) {
+        complex<float> val = ifft_result[i * Nr + j];
+        outfile << val.real() << " " << val.imag();
+        if (j < Nr - 1) {
+            outfile << " ";  // 在每行的数之间添加空格
+        }
+    }
+    outfile << "\n";  // 每行结束添加换行
+}
+
+outfile.close();
+cout << "结果已保存到result.txt" << endl;
+
+
+
             }
+            
 
-            // 设置输出精度
-            outfile << scientific;  // 使用科学计数法
-            outfile.precision(6);   // 设置精度为6位
-
-            // 写入数据
-            for (int i = 0; i < Na; ++i) {
-                for (int j = 0; j < Nr; ++j) {
-                    complex<float> val = ifft_result[i * Nr + j];
-                    outfile << val.real() << " " << val.imag();
-                    if (j < Nr - 1) {
-                        outfile << " ";  // 在每行的数之间添加空格
-                    }
-                }
-                outfile << "\n";  // 每行结束添加换行
-            }
-
-            outfile.close();
-            cout << "结果已保存到result.txt" << endl;
-
-            CNRT_CHECK(cnrtFree(d_ifft_in));
             CNRT_CHECK(cnrtFree(d_ifft_out));
+            CNRT_CHECK(cnrtFree(d_result));
             CNRT_CHECK(cnrtFree(d_ifft_transposed));
 
     } catch (const std::exception& e) {
@@ -973,6 +972,9 @@ int main(int argc, char* argv[]) {
     // 设置调试标志
     if (args.count("--info") || args.count("-i")) {
         G_DEBUG = true;
+    }
+    if (args.count("--out") || args.count("-o")) {
+        G_OUTPUT = true;
     }
 
     process_wk();
